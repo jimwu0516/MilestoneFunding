@@ -122,23 +122,40 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function fund(uint256 projectId) external payable nonReentrant {
         Project storage p = projects[projectId];
         require(p.state == ProjectState.Funding, "Not funding");
-        require(msg.value > 0, "Zero");
+        require(msg.value > 0, "Zero value");
+
+        uint256 remaining = p.softCapWei - p.totalFunded;
+        require(remaining > 0, "Already funded");
+
+        uint256 accepted = msg.value;
+        uint256 refund = 0;
+
+        if (msg.value > remaining) {
+            accepted = remaining;
+            refund = msg.value - remaining;
+        }
 
         if (!p.isInvestor[msg.sender]) {
             p.isInvestor[msg.sender] = true;
             p.investors.push(msg.sender);
         }
 
-        p.invested[msg.sender] += msg.value;
-        p.totalFunded += msg.value;
+        p.invested[msg.sender] += accepted;
+        p.totalFunded += accepted;
 
-        emit Funded(projectId, msg.sender, msg.value);
+        emit Funded(projectId, msg.sender, accepted);
 
         if (p.totalFunded >= p.softCapWei) {
             _snapshot(p);
             p.state = ProjectState.BuildingStage1;
         }
+
+        if (refund > 0) {
+            (bool ok, ) = msg.sender.call{value: refund}("");
+            require(ok, "Refund failed");
+        }
     }
+
 
     function _snapshot(Project storage p) internal {
         uint256 totalWeight;
