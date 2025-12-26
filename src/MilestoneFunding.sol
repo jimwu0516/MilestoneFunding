@@ -440,5 +440,78 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
         return "Unknown";
     }
+
+    function getAllFundingProjects() external view returns (uint256[] memory) {
+        uint256 count;
+        
+        for (uint256 i = 1; i <= projectCount; i++) {
+            if (projects[i].state == ProjectState.Funding) {
+                count++;
+            }
+        }
+
+        uint256[] memory fundingProjects = new uint256[](count);
+        uint256 index = 0;
+
+        for (uint256 i = 1; i <= projectCount; i++) {
+            if (projects[i].state == ProjectState.Funding) {
+                fundingProjects[index] = i;
+                index++;
+            }
+        }
+
+        return fundingProjects;
+    }
+
+    function getMyInvestedProjects() 
+        external 
+        view 
+        returns (
+            uint256[] memory projectIds,
+            address[] memory creators,
+            string[] memory names,
+            string[] memory descriptions,
+            uint256[] memory softCaps,
+            uint256[] memory totalFundeds,
+            uint256[] memory bonds,
+            string[] memory states
+        ) 
+    {
+        uint256 count;
+
+        for (uint256 i = 1; i <= projectCount; i++) {
+            if (projects[i].isInvestor[msg.sender]) {
+                count++;
+            }
+        }
+
+        projectIds = new uint256[](count);
+        creators = new address[](count);
+        names = new string[](count);
+        descriptions = new string[](count);
+        softCaps = new uint256[](count);
+        totalFundeds = new uint256[](count);
+        bonds = new uint256[](count);
+        states = new string[](count);
+
+        uint256 index = 0;
+
+        for (uint256 i = 1; i <= projectCount; i++) {
+            if (projects[i].isInvestor[msg.sender]) {
+                Project storage p = projects[i];
+                projectIds[index] = i;
+                creators[index] = p.creator;
+                names[index] = p.name;
+                descriptions[index] = p.description;
+                softCaps[index] = p.softCapWei;
+                totalFundeds[index] = p.totalFunded;
+                bonds[index] = p.bond;
+                states[index] = getProjectState(i);
+                index++;
+            }
+        }
+    }
+
+
 }
 
