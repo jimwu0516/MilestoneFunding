@@ -573,6 +573,14 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         }
     }
 
+    function getClaimableInvestor() external view returns (uint256) {
+        return claimableInvestor[msg.sender];
+    }
+
+    function getClaimableCreator() external view returns (uint256) {
+        return claimableCreator[msg.sender];
+    }
+
 
 
 }
