@@ -51,6 +51,61 @@ contract MilestoneFundingTest is Test {
         assertEq(state, "Funding");
     }
 
+    function testCancelProject() public {
+        uint256 softCap = 10 ether;
+        uint256 bond = softCap / 10;
+
+        vm.deal(creator, bond);
+        vm.prank(creator);
+        mf.createProject{value: bond}(
+            "Test Project",
+            "Desc",
+            softCap / 1 ether
+        );
+
+        vm.deal(investor1, 6 ether);
+        vm.prank(investor1);
+        mf.fund{value: 6 ether}(1);
+
+        vm.deal(investor2, 3 ether);
+        vm.prank(investor2);
+        mf.fund{value: 3 ether}(1);
+
+        (, , , , uint256 totalFunded, , string memory state) = mf
+            .getProjectCore(1);
+        assertEq(totalFunded, 9 ether);
+        assertEq(state, "Funding");
+
+        vm.prank(creator);
+        mf.cancelProject(1);
+
+        (, , , , , , state) = mf.getProjectCore(1);
+        assertEq(state, "Cancelled");
+
+        uint256 inv1Before = investor1.balance;
+        uint256 inv2Before = investor2.balance;
+
+        vm.prank(investor1);
+        mf.claimInvestor();
+
+        vm.prank(investor2);
+        mf.claimInvestor();
+
+        uint256 inv1After = investor1.balance;
+        uint256 inv2After = investor2.balance;
+
+        assertEq(inv1After - inv1Before, 6 ether + (bond * 6) / 9);
+
+        assertEq(inv2After - inv2Before, 3 ether + (bond * 3) / 9);
+
+        vm.prank(creator);
+        vm.expectRevert("Nothing");
+        mf.claimCreator();
+
+        (, , , , , uint256 remainingBond, ) = mf.getProjectCore(1);
+        assertEq(remainingBond, 0);
+    }
+
     function testFundAndSnapshot() public {
         uint256 softCap = 10 ether;
         uint256 bond = softCap / 10;
@@ -164,7 +219,8 @@ contract MilestoneFundingTest is Test {
         vm.prank(investor2);
         mf.fund{value: 4 ether}(1);
 
-        (, , , uint256 totalFunded, , , string memory state) = mf.getProjectCore(1);
+        (, , , uint256 totalFunded, , , string memory state) = mf
+            .getProjectCore(1);
         assertEq(totalFunded, 10 ether);
         assertEq(state, "BuildingStage1");
 
