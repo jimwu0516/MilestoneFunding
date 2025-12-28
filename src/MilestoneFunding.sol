@@ -94,7 +94,14 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 milestone,
         bool passed
     );
-    event Claim(address indexed user, uint256 amount, string role);
+    event Claim(
+        address indexed user, 
+        uint256 amount, 
+        string role
+    );
+    event ProjectCancelled(
+        uint256 indexed projectId
+    );
 
     /*-----------------------FUNCTIONS-----------------------*/
 
@@ -155,6 +162,40 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             require(ok, "Refund failed");
         }
     }
+
+    function cancelProject(uint256 projectId) external nonReentrant {
+        Project storage p = projects[projectId];
+
+        require(msg.sender == p.creator, "Not creator");
+        require(p.state == ProjectState.Funding, "Can only cancel in Funding");
+
+        p.state = ProjectState.Cancelled;
+
+        uint256 totalFunded = p.totalFunded;
+        uint256 bond = p.bond;
+
+        for (uint256 i = 0; i < p.investors.length; i++) {
+            address inv = p.investors[i];
+            uint256 investedAmount = p.invested[inv];
+
+            if (investedAmount > 0) {
+                uint256 refund = investedAmount;
+
+                if (bond > 0 && totalFunded > 0) {
+                    uint256 bondShare = (bond * investedAmount) / totalFunded;
+                    refund += bondShare;
+                }
+
+                claimableInvestor[inv] += refund;
+                p.invested[inv] = 0;
+            }
+        }
+
+        emit ProjectCancelled (projectId);
+
+        p.bond = 0;
+    }
+
 
 
     function _snapshot(Project storage p) internal {
