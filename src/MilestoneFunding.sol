@@ -532,7 +532,8 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             uint256[] memory softCaps,
             uint256[] memory totalFundeds,
             uint256[] memory bonds,
-            string[] memory states
+            string[] memory states,
+            uint256[] memory investments  
         ) 
     {
         uint256 count;
@@ -551,6 +552,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         totalFundeds = new uint256[](count);
         bonds = new uint256[](count);
         states = new string[](count);
+        investments = new uint256[](count);  
 
         uint256 index = 0;
 
@@ -565,10 +567,12 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
                 totalFundeds[index] = p.totalFunded;
                 bonds[index] = p.bond;
                 states[index] = getProjectState(i);
+                investments[index] = p.invested[msg.sender]; 
                 index++;
             }
         }
     }
+
 
 
 }
