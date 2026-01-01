@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-
 contract MilestoneFunding is Ownable, ReentrancyGuard {
     constructor() Ownable(msg.sender) {}
 
@@ -71,8 +70,10 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 indexed projectId,
         string name,
         string description,
+        uint256 softCapWei,
         address indexed creator
     );
+
     event Funded(
         uint256 indexed projectId,
         address indexed investor,
@@ -94,23 +95,19 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 milestone,
         bool passed
     );
-    event Claim(
-        address indexed user, 
-        uint256 amount, 
-        string role
-    );
-    event ProjectCancelled(
-        uint256 indexed projectId
-    );
+    event Claim(address indexed user, uint256 amount, string role);
+    event ProjectCancelled(uint256 indexed projectId);
 
-    /*-----------------------FUNCTIONS-----------------------*/
+    /*-----------------------CREATE PROJECT-----------------------*/
 
     function createProject(
         string calldata name,
         string calldata description,
-        uint256 softCapEther
+        uint256 softCapWei
     ) external payable {
-        uint256 bondWei = (softCapEther * 1 ether) / 10;
+        require(softCapWei > 0, "Soft cap = 0");
+
+        uint256 bondWei = softCapWei / 10;
         require(msg.value == bondWei, "Bond = 10%");
 
         projectCount++;
@@ -119,12 +116,20 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         p.creator = msg.sender;
         p.name = name;
         p.description = description;
-        p.softCapWei = softCapEther * 1 ether;
-        p.bond = msg.value;
+        p.softCapWei = softCapWei;
+        p.bond = bondWei;
         p.state = ProjectState.Funding;
 
-        emit ProjectCreated(projectCount, name, description, msg.sender);
+        emit ProjectCreated(
+            projectCount,
+            name,
+            description,
+            softCapWei,
+            msg.sender
+        );
     }
+
+    /*-----------------------FUNDING-----------------------*/
 
     function fund(uint256 projectId) external payable nonReentrant {
         Project storage p = projects[projectId];
@@ -135,7 +140,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         require(remaining > 0, "Already funded");
 
         uint256 accepted = msg.value;
-        uint256 refund = 0;
+        uint256 refund;
 
         if (msg.value > remaining) {
             accepted = remaining;
@@ -191,12 +196,10 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             }
         }
 
-        emit ProjectCancelled (projectId);
+        emit ProjectCancelled(projectId);
 
         p.bond = 0;
     }
-
-
 
     function _snapshot(Project storage p) internal {
         uint256 totalWeight;
@@ -501,7 +504,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
     function getAllFundingProjects() external view returns (uint256[] memory) {
         uint256 count;
-        
+
         for (uint256 i = 1; i <= projectCount; i++) {
             if (projects[i].state == ProjectState.Funding) {
                 count++;
@@ -521,9 +524,9 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         return fundingProjects;
     }
 
-    function getMyInvestedProjects() 
-        external 
-        view 
+    function getMyInvestedProjects()
+        external
+        view
         returns (
             uint256[] memory projectIds,
             address[] memory creators,
@@ -533,8 +536,8 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             uint256[] memory totalFundeds,
             uint256[] memory bonds,
             string[] memory states,
-            uint256[] memory investments  
-        ) 
+            uint256[] memory investments
+        )
     {
         uint256 count;
 
@@ -552,7 +555,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         totalFundeds = new uint256[](count);
         bonds = new uint256[](count);
         states = new string[](count);
-        investments = new uint256[](count);  
+        investments = new uint256[](count);
 
         uint256 index = 0;
 
@@ -567,7 +570,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
                 totalFundeds[index] = p.totalFunded;
                 bonds[index] = p.bond;
                 states[index] = getProjectState(i);
-                investments[index] = p.invested[msg.sender]; 
+                investments[index] = p.invested[msg.sender];
                 index++;
             }
         }
@@ -580,8 +583,4 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function getClaimableCreator() external view returns (uint256) {
         return claimableCreator[msg.sender];
     }
-
-
-
 }
-
