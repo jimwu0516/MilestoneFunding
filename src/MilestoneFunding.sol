@@ -179,20 +179,23 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 totalFunded = p.totalFunded;
         uint256 bond = p.bond;
 
-        for (uint256 i = 0; i < p.investors.length; i++) {
-            address inv = p.investors[i];
-            uint256 investedAmount = p.invested[inv];
+        if (totalFunded == 0) {
+            claimableOwner[owner()] += bond;
+        } 
+        else {
+            for (uint256 i = 0; i < p.investors.length; i++) {
+                address inv = p.investors[i];
+                uint256 investedAmount = p.invested[inv];
 
-            if (investedAmount > 0) {
-                uint256 refund = investedAmount;
+                if (investedAmount > 0) {
+                    uint256 refund = investedAmount;
 
-                if (bond > 0 && totalFunded > 0) {
                     uint256 bondShare = (bond * investedAmount) / totalFunded;
                     refund += bondShare;
-                }
 
-                claimableInvestor[inv] += refund;
-                p.invested[inv] = 0;
+                    claimableInvestor[inv] += refund;
+                    p.invested[inv] = 0;
+                }
             }
         }
 
@@ -200,6 +203,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
         p.bond = 0;
     }
+
 
     function _snapshot(Project storage p) internal {
         uint256 totalWeight;
