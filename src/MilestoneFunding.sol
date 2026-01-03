@@ -181,8 +181,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
         if (totalFunded == 0) {
             claimableOwner[owner()] += bond;
-        } 
-        else {
+        } else {
             for (uint256 i = 0; i < p.investors.length; i++) {
                 address inv = p.investors[i];
                 uint256 investedAmount = p.invested[inv];
@@ -203,7 +202,6 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
         p.bond = 0;
     }
-
 
     function _snapshot(Project storage p) internal {
         uint256 totalWeight;
@@ -586,5 +584,12 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
     function getClaimableCreator() external view returns (uint256) {
         return claimableCreator[msg.sender];
+    }
+
+    function getMyVotes(
+        uint256 projectId,
+        address user
+    ) external view returns (VoteOption[3] memory) {
+        return projects[projectId].votes[user];
     }
 }
