@@ -24,6 +24,17 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         FailureRound3
     }
 
+    enum Category {
+        Technology,
+        Hardware,
+        Creative,
+        Education,
+        SocialImpact,
+        Research,
+        Business,
+        Community
+    }
+
     enum VoteOption {
         None,
         Yes,
@@ -36,6 +47,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         address creator;
         string name;
         string description;
+        Category category;
         uint256 softCapWei;
         uint256 totalFunded;
         uint256 bond;
@@ -70,6 +82,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 indexed projectId,
         string name,
         string description,
+        Category category,
         uint256 softCapWei,
         address indexed creator
     );
@@ -103,7 +116,8 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function createProject(
         string calldata name,
         string calldata description,
-        uint256 softCapWei
+        uint256 softCapWei,
+        Category category
     ) external payable {
         require(softCapWei > 0, "Soft cap = 0");
 
@@ -116,6 +130,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         p.creator = msg.sender;
         p.name = name;
         p.description = description;
+        p.category = category;
         p.softCapWei = softCapWei;
         p.bond = bondWei;
         p.state = ProjectState.Funding;
@@ -124,6 +139,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             projectCount,
             name,
             description,
+            category,
             softCapWei,
             msg.sender
         );
@@ -417,6 +433,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             address creator,
             string memory name,
             string memory description,
+            Category category,
             uint256 softCapWei,
             uint256 totalFunded,
             uint256 bond,
@@ -428,6 +445,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             p.creator,
             p.name,
             p.description,
+            p.category,
             p.softCapWei,
             p.totalFunded,
             p.bond,
@@ -534,6 +552,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             address[] memory creators,
             string[] memory names,
             string[] memory descriptions,
+            Category[] memory categories,
             uint256[] memory softCaps,
             uint256[] memory totalFundeds,
             uint256[] memory bonds,
@@ -553,6 +572,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         creators = new address[](count);
         names = new string[](count);
         descriptions = new string[](count);
+        categories = new Category[](count);
         softCaps = new uint256[](count);
         totalFundeds = new uint256[](count);
         bonds = new uint256[](count);
@@ -568,6 +588,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
                 creators[index] = p.creator;
                 names[index] = p.name;
                 descriptions[index] = p.description;
+                categories[index] = p.category;
                 softCaps[index] = p.softCapWei;
                 totalFundeds[index] = p.totalFunded;
                 bonds[index] = p.bond;
