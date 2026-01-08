@@ -287,6 +287,8 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             "Invalid vote option"
         );
 
+        require(uint(option) > 0 && uint(option) <= uint(VoteOption.No), "Invalid vote option");
+
         uint256 m = _currentMilestone(p);
         require(!p.finalized[m], "Finalized");
         require(p.votes[msg.sender][m] == VoteOption.None, "Voted");
