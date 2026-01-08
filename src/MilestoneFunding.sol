@@ -126,6 +126,9 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 bondWei = softCapWei / 10;
         require(msg.value == bondWei, "Bond = 10%");
 
+        require(bytes(description).length > 0, "Description required");
+        require(bytes(description).length <= 1024, "Description too long");
+
         for (uint i = 0; i < 3; i++) {
             require(
                 bytes(milestoneDescriptions[i]).length > 0,
@@ -133,6 +136,8 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             );
             require(bytes(milestoneDescriptions[i]).length <= 256, "Too long");
         }
+        require(uint(category) <= uint(Category.Community), "Invalid category");
+
 
         projectCount++;
         Project storage p = projects[projectCount];
