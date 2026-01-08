@@ -624,6 +624,10 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         return claimableCreator[msg.sender];
     }
 
+    function getClaimableOwner()external view returns (uint256) {
+        return claimableOwner[msg.sender];
+    }
+
     function getMyVotes(
         uint256 projectId,
         address user
