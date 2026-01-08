@@ -138,7 +138,6 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         }
         require(uint(category) <= uint(Category.Community), "Invalid category");
 
-
         projectCount++;
         Project storage p = projects[projectCount];
 
@@ -255,6 +254,18 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     ) external {
         Project storage p = projects[projectId];
         require(msg.sender == p.creator, "Not creator");
+
+        uint256 len = bytes(ipfsHash).length;
+        require(len > 0, "IPFS hash required");
+        require(len <= 128, "IPFS hash too long");
+
+        if (len == 46) {
+            bytes memory hashBytes = bytes(ipfsHash);
+            require(
+                hashBytes[0] == "Q" && hashBytes[1] == "m",
+                "Invalid CIDv0"
+            );
+        }
 
         uint256 m;
         if (p.state == ProjectState.BuildingStage1) m = 0;
@@ -629,7 +640,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         return claimableCreator[msg.sender];
     }
 
-    function getClaimableOwner()external view returns (uint256) {
+    function getClaimableOwner() external view returns (uint256) {
         return claimableOwner[msg.sender];
     }
 
