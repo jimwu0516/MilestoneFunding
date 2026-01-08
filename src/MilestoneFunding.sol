@@ -62,6 +62,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256[3] yesWeight;
         uint256[3] noWeight;
         bool[3] finalized;
+        string[3] milestoneDescriptions;
         string[3] milestoneHashes;
     }
 
@@ -117,12 +118,21 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         string calldata name,
         string calldata description,
         uint256 softCapWei,
-        Category category
+        Category category,
+        string[3] calldata milestoneDescriptions
     ) external payable {
         require(softCapWei > 0, "Soft cap = 0");
 
         uint256 bondWei = softCapWei / 10;
         require(msg.value == bondWei, "Bond = 10%");
+
+        for (uint i = 0; i < 3; i++) {
+            require(
+                bytes(milestoneDescriptions[i]).length > 0,
+                "Empty milestone description"
+            );
+            require(bytes(milestoneDescriptions[i]).length <= 256, "Too long");
+        }
 
         projectCount++;
         Project storage p = projects[projectCount];
@@ -134,6 +144,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         p.softCapWei = softCapWei;
         p.bond = bondWei;
         p.state = ProjectState.Funding;
+        p.milestoneDescriptions = milestoneDescriptions;
 
         emit ProjectCreated(
             projectCount,
@@ -597,6 +608,12 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
                 index++;
             }
         }
+    }
+
+    function getMilestoneDescriptions(
+        uint256 projectId
+    ) external view returns (string[3] memory) {
+        return projects[projectId].milestoneDescriptions;
     }
 
     function getClaimableInvestor() external view returns (uint256) {
