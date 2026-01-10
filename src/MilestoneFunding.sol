@@ -10,18 +10,18 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     /*-----------------------ENUM-----------------------*/
 
     enum ProjectState {
-        Funding,
         Cancelled,
+        Funding,
         BuildingStage1,
         VotingRound1,
+        FailureRound1,
         BuildingStage2,
         VotingRound2,
+        FailureRound2,
         BuildingStage3,
         VotingRound3,
-        Completed,
-        FailureRound1,
-        FailureRound2,
-        FailureRound3
+        FailureRound3,
+        Completed
     }
 
     enum Category {
@@ -268,13 +268,20 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         }
 
         uint256 m;
-        if (p.state == ProjectState.BuildingStage1) m = 0;
-        else if (p.state == ProjectState.BuildingStage2) m = 1;
-        else if (p.state == ProjectState.BuildingStage3) m = 2;
-        else revert("Wrong stage");
+        if (p.state == ProjectState.BuildingStage1) {
+            m = 0;
+            p.state = ProjectState.VotingRound1;
+        } else if (p.state == ProjectState.BuildingStage2) {
+            m = 1;
+            p.state = ProjectState.VotingRound2;
+        } else if (p.state == ProjectState.BuildingStage3) {
+            m = 2;
+            p.state = ProjectState.VotingRound3;
+        } else {
+            revert("Wrong stage");
+        }
 
         p.milestoneHashes[m] = ipfsHash;
-        p.state = ProjectState(uint256(ProjectState.VotingRound1) + m * 2);
 
         emit MilestoneSubmitted(projectId, m, ipfsHash);
     }
@@ -287,7 +294,10 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             "Invalid vote option"
         );
 
-        require(uint(option) > 0 && uint(option) <= uint(VoteOption.No), "Invalid vote option");
+        require(
+            uint(option) > 0 && uint(option) <= uint(VoteOption.No),
+            "Invalid vote option"
+        );
 
         uint256 m = _currentMilestone(p);
         require(!p.finalized[m], "Finalized");
@@ -348,14 +358,17 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function _handleResult(Project storage p, uint256 m, bool passed) internal {
         uint256 alreadyReleased;
 
-        for (uint256 i = 0; i < m; i++) {
+        for (uint256 i = 0; i <= m; i++) {
             if (i == 0) alreadyReleased += (p.totalFunded * 20) / 100;
-            if (i == 1) alreadyReleased += (p.totalFunded * 30) / 100;
-            if (i == 2) alreadyReleased += (p.totalFunded * 50) / 100;
+            else if (i == 1) alreadyReleased += (p.totalFunded * 30) / 100;
+            else if (i == 2) alreadyReleased += (p.totalFunded * 50) / 100;
         }
 
         if (!passed) {
-            p.state = ProjectState(uint256(ProjectState.FailureRound1) + m);
+            if (m == 0) p.state = ProjectState.FailureRound1;
+            else if (m == 1) p.state = ProjectState.FailureRound2;
+            else p.state = ProjectState.FailureRound3;
+
             claimableOwner[owner()] += p.bond;
 
             uint256 refundTotal = p.totalFunded - alreadyReleased;
@@ -365,6 +378,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
                     p.totalFunded;
                 if (refund > 0) claimableInvestor[inv] += refund;
             }
+
             return;
         }
 
@@ -419,10 +433,19 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function _currentMilestone(
         Project storage p
     ) internal view returns (uint256) {
-        if (p.state == ProjectState.VotingRound1) return 0;
-        if (p.state == ProjectState.VotingRound2) return 1;
-        if (p.state == ProjectState.VotingRound3) return 2;
-        revert("Not voting");
+        if (
+            p.state == ProjectState.VotingRound1 ||
+            p.state == ProjectState.FailureRound1
+        ) return 0;
+        if (
+            p.state == ProjectState.VotingRound2 ||
+            p.state == ProjectState.FailureRound2
+        ) return 1;
+        if (
+            p.state == ProjectState.VotingRound3 ||
+            p.state == ProjectState.FailureRound3
+        ) return 2;
+        revert("Not voting or failed milestone");
     }
 
     function _weight(
@@ -466,7 +489,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             uint256 softCapWei,
             uint256 totalFunded,
             uint256 bond,
-            string memory state
+            ProjectState state
         )
     {
         Project storage p = projects[projectId];
@@ -478,7 +501,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             p.softCapWei,
             p.totalFunded,
             p.bond,
-            getProjectState(projectId)
+            p.state
         );
     }
 
@@ -535,20 +558,22 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     ) public view returns (string memory) {
         Project storage p = projects[projectId];
 
-        if (p.state == ProjectState.Funding) return "Funding";
-        if (p.state == ProjectState.Cancelled) return "Cancelled";
-        if (p.state == ProjectState.BuildingStage1) return "BuildingStage1";
-        if (p.state == ProjectState.VotingRound1) return "VotingRound1";
-        if (p.state == ProjectState.BuildingStage2) return "BuildingStage2";
-        if (p.state == ProjectState.VotingRound2) return "VotingRound2";
-        if (p.state == ProjectState.BuildingStage3) return "BuildingStage3";
-        if (p.state == ProjectState.VotingRound3) return "VotingRound3";
-        if (p.state == ProjectState.Completed) return "Completed";
-        if (p.state == ProjectState.FailureRound1) return "FailureRound1";
-        if (p.state == ProjectState.FailureRound2) return "FailureRound2";
-        if (p.state == ProjectState.FailureRound3) return "FailureRound3";
+        string[12] memory states = [
+            "Cancelled",
+            "Funding",
+            "BuildingStage1",
+            "VotingRound1",
+            "FailureRound1",
+            "BuildingStage2",
+            "VotingRound2",
+            "FailureRound2",
+            "BuildingStage3",
+            "VotingRound3",
+            "FailureRound3",
+            "Completed"
+        ];
 
-        return "Unknown";
+        return states[uint(p.state)];
     }
 
     function getAllFundingProjects() external view returns (uint256[] memory) {
