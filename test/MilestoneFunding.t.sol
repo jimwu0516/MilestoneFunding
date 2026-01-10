@@ -51,14 +51,14 @@ contract MilestoneFundingTest is Test {
             uint256 softCapWei,
             ,
             uint256 bondWei,
-            string memory state
+            MilestoneFunding.ProjectState state
         ) = mf.getProjectCore(1);
 
         assertEq(projCreator, creator);
         assertEq(name, "Test Project");
         assertEq(softCapWei, softCap);
         assertEq(bondWei, bond);
-        assertEq(state, "Funding");
+        assertEq(uint(state), uint(MilestoneFunding.ProjectState.Funding));
     }
 
     function testCancelProject() public {
@@ -86,8 +86,10 @@ contract MilestoneFundingTest is Test {
         vm.prank(creator);
         mf.cancelProject(1);
 
-        (, , , , , , , string memory state) = mf.getProjectCore(1);
-        assertEq(state, "Cancelled");
+        (, , , , , , , MilestoneFunding.ProjectState state) = mf.getProjectCore(
+            1
+        );
+        assertEq(uint(state), uint(MilestoneFunding.ProjectState.Cancelled));
 
         uint256 i1Before = investor1.balance;
         uint256 i2Before = investor2.balance;
@@ -124,11 +126,22 @@ contract MilestoneFundingTest is Test {
         vm.prank(investor2);
         mf.fund{value: 4 ether}(1);
 
-        (, , , , uint256 totalFunded, , , string memory state) = mf
-            .getProjectCore(1);
+        (
+            ,
+            ,
+            ,
+            ,
+            uint256 totalFunded,
+            ,
+            ,
+            MilestoneFunding.ProjectState state
+        ) = mf.getProjectCore(1);
 
         assertEq(totalFunded, 10 ether);
-        assertEq(state, "BuildingStage1");
+        assertEq(
+            uint(state),
+            uint(MilestoneFunding.ProjectState.BuildingStage1)
+        );
     }
 
     function testSubmitMilestoneAndVotePass() public {
@@ -162,8 +175,13 @@ contract MilestoneFundingTest is Test {
         vm.prank(investor2);
         mf.vote(1, MilestoneFunding.VoteOption.Yes);
 
-        (, , , , , , , string memory state) = mf.getProjectCore(1);
-        assertEq(state, "BuildingStage2");
+        (, , , , , , , MilestoneFunding.ProjectState state) = mf.getProjectCore(
+            1
+        );
+        assertEq(
+            uint(state),
+            uint(MilestoneFunding.ProjectState.BuildingStage2)
+        );
     }
 
     function testVoteFailRefundAndOwnerGetsBond() public {
@@ -197,8 +215,13 @@ contract MilestoneFundingTest is Test {
         vm.prank(investor2);
         mf.vote(1, MilestoneFunding.VoteOption.Yes);
 
-        (, , , , , , , string memory state) = mf.getProjectCore(1);
-        assertEq(state, "FailureRound1");
+        (, , , , , , , MilestoneFunding.ProjectState state) = mf.getProjectCore(
+            1
+        );
+        assertEq(
+            uint(state),
+            uint(MilestoneFunding.ProjectState.FailureRound1)
+        );
 
         vm.prank(investor1);
         mf.claimInvestor();
