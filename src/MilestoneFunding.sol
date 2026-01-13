@@ -213,6 +213,12 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         if (totalFunded == 0) {
             claimableOwner[owner()] += bond;
         } else {
+
+            uint256 ownerBond = bond / 2;
+            uint256 investorBond = bond - ownerBond; 
+
+            claimableOwner[owner()] += ownerBond;
+
             for (uint256 i = 0; i < p.investors.length; i++) {
                 address inv = p.investors[i];
                 uint256 investedAmount = p.invested[inv];
@@ -220,7 +226,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
                 if (investedAmount > 0) {
                     uint256 refund = investedAmount;
 
-                    uint256 bondShare = (bond * investedAmount) / totalFunded;
+                    uint256 bondShare = (investorBond * investedAmount) / totalFunded;
                     refund += bondShare;
 
                     claimableInvestor[inv] += refund;
