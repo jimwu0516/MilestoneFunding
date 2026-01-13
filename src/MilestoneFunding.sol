@@ -82,8 +82,6 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     event ProjectCreated(
         uint256 indexed projectId,
         string name,
-        string description,
-        Category category,
         uint256 softCapWei,
         address indexed creator
     );
@@ -153,8 +151,6 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         emit ProjectCreated(
             projectCount,
             name,
-            description,
-            category,
             softCapWei,
             msg.sender
         );
