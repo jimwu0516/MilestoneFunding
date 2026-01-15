@@ -119,7 +119,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         Category category,
         string[3] calldata milestoneDescriptions
     ) external payable {
-        require(softCapWei > 0, "Soft cap = 0");
+        require(softCapWei >= 100000000000000, "Soft cap must be >= 0.0001 ETH");
 
         uint256 bondWei = softCapWei / 10;
         require(msg.value == bondWei, "Bond = 10%");
@@ -161,7 +161,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function fund(uint256 projectId) external payable nonReentrant {
         Project storage p = projects[projectId];
         require(p.state == ProjectState.Funding, "Not funding");
-        require(msg.value > 0, "Zero value");
+        require(msg.value >= 100000000000000, "Value must be >= 0.0001 ETH"); 
 
         uint256 remaining = p.softCapWei - p.totalFunded;
         require(remaining > 0, "Already funded");
