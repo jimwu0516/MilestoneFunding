@@ -43,34 +43,44 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
     /*-----------------------STRUCT-----------------------*/
 
-    struct Project {
+    struct ProjectCore {
         address creator;
-        string name;
-        string description;
         Category category;
         uint256 softCapWei;
         uint256 totalFunded;
         uint256 bond;
         ProjectState state;
-        address[] investors;
-        mapping(address => uint256) invested;
-        mapping(address => bool) isInvestor;
+    }
+
+    struct ProjectMeta {
+        string name;
+        string description;
+        string[3] milestoneDescriptions;
+        string[3] milestoneHashes;
+    }
+
+    struct ProjectVoting {
         uint256 snapshotTotalFund;
         uint256 snapshotTotalWeight;
-        mapping(address => VoteOption[3]) votes;
         uint256[3] yesWeight;
         uint256[3] noWeight;
         bool[3] finalized;
-        string[3] milestoneDescriptions;
-        string[3] milestoneHashes;
     }
 
     /*-----------------------STORAGE-----------------------*/
 
     uint256 public projectCount;
-    mapping(uint256 => Project) private projects;
+
+    mapping(uint256 => ProjectCore) public projectCore;
+    mapping(uint256 => ProjectMeta) public projectMeta;
+    mapping(uint256 => ProjectVoting) public projectVoting;
+
+    mapping(uint256 => mapping(address => uint256)) public invested;
+    mapping(uint256 => mapping(address => bool)) public isInvestor;
+    mapping(uint256 => mapping(address => VoteOption[3])) public votes;
+    mapping(uint256 => address[]) public investors;
+
     mapping(uint256 => mapping(address => uint256)) public snapshotWeight;
-    mapping(uint256 => uint256) public snapshotTotalWeight;
 
     /*-----------------------CLAIM LEDGERS-----------------------*/
 
@@ -143,28 +153,43 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         require(uint(category) <= uint(Category.Community), "Invalid category");
 
         projectCount++;
-        Project storage p = projects[projectCount];
+        uint256 projectId = projectCount;
 
-        p.creator = msg.sender;
-        p.name = name;
-        p.description = description;
-        p.category = category;
-        p.softCapWei = softCapWei;
-        p.bond = bondWei;
-        p.state = ProjectState.Funding;
-        p.milestoneDescriptions = milestoneDescriptions;
+        projectCore[projectId] = ProjectCore({
+            creator: msg.sender,
+            category: category,
+            softCapWei: softCapWei,
+            totalFunded: 0,
+            bond: bondWei,
+            state: ProjectState.Funding
+        });
 
-        emit ProjectCreated(projectCount, name, softCapWei, msg.sender);
+        projectMeta[projectId] = ProjectMeta({
+            name: name,
+            description: description,
+            milestoneDescriptions: milestoneDescriptions,
+            milestoneHashes: ["", "", ""]
+        });
+
+        projectVoting[projectId] = ProjectVoting({
+            snapshotTotalFund: 0,
+            snapshotTotalWeight: 0,
+            yesWeight: [uint256(0), 0, 0],
+            noWeight: [uint256(0), 0, 0],
+            finalized: [false, false, false]
+        });
+
+        emit ProjectCreated(projectId, name, softCapWei, msg.sender);
     }
 
     /*-----------------------FUNDING-----------------------*/
 
     function fund(uint256 projectId) external payable nonReentrant {
-        Project storage p = projects[projectId];
-        require(p.state == ProjectState.Funding, "Not funding");
+        ProjectCore storage c = projectCore[projectId];
+        require(c.state == ProjectState.Funding, "Not funding");
         require(msg.value >= 100000000000000, "Value must be >= 0.0001 ETH");
 
-        uint256 remaining = p.softCapWei - p.totalFunded;
+        uint256 remaining = c.softCapWei - c.totalFunded;
         require(remaining > 0, "Already funded");
 
         uint256 accepted = msg.value;
@@ -175,19 +200,19 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             refund = msg.value - remaining;
         }
 
-        if (!p.isInvestor[msg.sender]) {
-            p.isInvestor[msg.sender] = true;
-            p.investors.push(msg.sender);
+        if (!isInvestor[projectId][msg.sender]) {
+            isInvestor[projectId][msg.sender] = true;
+            investors[projectId].push(msg.sender);
         }
 
-        p.invested[msg.sender] += accepted;
-        p.totalFunded += accepted;
+        invested[projectId][msg.sender] += accepted;
+        c.totalFunded += accepted;
 
         emit Funded(projectId, msg.sender, accepted);
 
-        if (p.totalFunded >= p.softCapWei) {
-            _snapshot(p, projectId);
-            p.state = ProjectState.BuildingStage1;
+        if (c.totalFunded >= c.softCapWei) {
+            _snapshot(projectId);
+            c.state = ProjectState.BuildingStage1;
         }
 
         if (refund > 0) {
@@ -197,52 +222,54 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     }
 
     function cancelProject(uint256 projectId) external nonReentrant {
-        Project storage p = projects[projectId];
+        ProjectCore storage c = projectCore[projectId];
+        require(msg.sender == c.creator, "Not creator");
+        require(c.state == ProjectState.Funding, "Can only cancel in Funding");
 
-        require(msg.sender == p.creator, "Not creator");
-        require(p.state == ProjectState.Funding, "Can only cancel in Funding");
+        c.state = ProjectState.Cancelled;
 
-        p.state = ProjectState.Cancelled;
-
-        uint256 totalFunded = p.totalFunded;
-        uint256 bond = p.bond;
+        uint256 totalFunded = c.totalFunded;
+        uint256 bond = c.bond;
 
         if (totalFunded == 0) {
             claimableOwner[owner()] += bond;
         } else {
             claimableOwner[owner()] += bond / 2;
-
             uint256 investorBond = bond - (bond / 2);
             refundPool[projectId] = totalFunded + investorBond;
         }
 
         emit ProjectCancelled(projectId);
-
-        p.bond = 0;
+        c.bond = 0;
     }
 
-    function _snapshot(Project storage p, uint256 projectId) internal {
+    function _snapshot(uint256 projectId) internal {
+        ProjectCore storage c = projectCore[projectId];
+        ProjectVoting storage v = projectVoting[projectId];
+
         uint256 totalWeight;
-        p.snapshotTotalFund = p.totalFunded;
+        v.snapshotTotalFund = c.totalFunded;
 
-        for (uint256 i = 0; i < p.investors.length; i++) {
-            address inv = p.investors[i];
-            uint256 amount = p.invested[inv];
-
-            uint256 w = _weight(amount, p.snapshotTotalFund);
+        for (uint256 i = 0; i < investors[projectId].length; i++) {
+            address inv = investors[projectId][i];
+            uint256 amount = invested[projectId][inv];
+            uint256 w = _weight(amount, v.snapshotTotalFund);
             snapshotWeight[projectId][inv] = w;
             totalWeight += w;
         }
 
-        snapshotTotalWeight[projectId] = totalWeight;
+        v.snapshotTotalWeight = totalWeight;
     }
+
+    /*-----------------------MILESTONE-----------------------*/
 
     function submitMilestone(
         uint256 projectId,
         string calldata ipfsHash
     ) external {
-        Project storage p = projects[projectId];
-        require(msg.sender == p.creator, "Not creator");
+        ProjectCore storage c = projectCore[projectId];
+        ProjectMeta storage m = projectMeta[projectId];
+        require(msg.sender == c.creator, "Not creator");
 
         uint256 len = bytes(ipfsHash).length;
         require(len > 0, "IPFS hash required");
@@ -256,65 +283,59 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             );
         }
 
-        uint256 m;
-        if (p.state == ProjectState.BuildingStage1) {
-            m = 0;
-            p.state = ProjectState.VotingRound1;
-        } else if (p.state == ProjectState.BuildingStage2) {
-            m = 1;
-            p.state = ProjectState.VotingRound2;
-        } else if (p.state == ProjectState.BuildingStage3) {
-            m = 2;
-            p.state = ProjectState.VotingRound3;
+        uint256 milestone;
+        if (c.state == ProjectState.BuildingStage1) {
+            milestone = 0;
+            c.state = ProjectState.VotingRound1;
+        } else if (c.state == ProjectState.BuildingStage2) {
+            milestone = 1;
+            c.state = ProjectState.VotingRound2;
+        } else if (c.state == ProjectState.BuildingStage3) {
+            milestone = 2;
+            c.state = ProjectState.VotingRound3;
         } else {
             revert("Wrong stage");
         }
 
-        p.milestoneHashes[m] = ipfsHash;
-
-        emit MilestoneSubmitted(projectId, m, ipfsHash);
+        m.milestoneHashes[milestone] = ipfsHash;
+        emit MilestoneSubmitted(projectId, milestone, ipfsHash);
     }
 
     function vote(uint256 projectId, VoteOption option) external {
-        Project storage p = projects[projectId];
-        require(p.isInvestor[msg.sender], "Not investor");
         require(
             option == VoteOption.Yes || option == VoteOption.No,
             "Invalid vote option"
         );
+        require(isInvestor[projectId][msg.sender], "Not investor");
 
+        ProjectVoting storage v = projectVoting[projectId];
+        uint256 mIndex = _currentMilestone(projectId);
+
+        require(!v.finalized[mIndex], "Finalized");
         require(
-            uint(option) > 0 && uint(option) <= uint(VoteOption.No),
-            "Invalid vote option"
+            votes[projectId][msg.sender][mIndex] == VoteOption.None,
+            "Voted"
         );
 
-        uint256 m = _currentMilestone(p);
-        require(!p.finalized[m], "Finalized");
-        require(p.votes[msg.sender][m] == VoteOption.None, "Voted");
-
-        p.votes[msg.sender][m] = option;
-
+        votes[projectId][msg.sender][mIndex] = option;
         uint256 w = snapshotWeight[projectId][msg.sender];
         require(w > 0, "No voting weight");
 
-        if (option == VoteOption.Yes) p.yesWeight[m] += w;
-        else p.noWeight[m] += w;
+        if (option == VoteOption.Yes) v.yesWeight[mIndex] += w;
+        else v.noWeight[mIndex] += w;
 
-        emit Voted(projectId, msg.sender, m, option);
-
-        _tryFinalize(p, projectId, m);
+        emit Voted(projectId, msg.sender, mIndex, option);
+        _tryFinalize(projectId, mIndex);
     }
 
-    /*-----------------------FINALIZE LOGIC-----------------------*/
+    /*-----------------------FINALIZE-----------------------*/
 
-    function _tryFinalize(
-        Project storage p,
-        uint256 projectId,
-        uint256 m
-    ) internal {
-        uint256 yes = p.yesWeight[m];
-        uint256 no = p.noWeight[m];
-        uint256 total = snapshotTotalWeight[projectId];
+    function _tryFinalize(uint256 projectId, uint256 m) internal {
+        ProjectVoting storage v = projectVoting[projectId];
+
+        uint256 yes = v.yesWeight[m];
+        uint256 no = v.noWeight[m];
+        uint256 total = v.snapshotTotalWeight;
 
         uint256 voted = yes + no;
         uint256 remaining = total > voted ? total - voted : 0;
@@ -322,77 +343,65 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         if (voted * 100 < total * 70) return;
 
         if (no * 100 >= total * 40) {
-            _finalize(p, projectId, m, false);
+            _finalize(projectId, m, false);
             return;
         }
 
         if (yes > no + remaining) {
-            _finalize(p, projectId, m, true);
+            _finalize(projectId, m, true);
         }
     }
 
-    function _finalize(
-        Project storage p,
-        uint256 projectId,
-        uint256 m,
-        bool passed
-    ) internal {
-        require(!p.finalized[m], "Done");
-        p.finalized[m] = true;
+    function _finalize(uint256 projectId, uint256 m, bool passed) internal {
+        ProjectVoting storage v = projectVoting[projectId];
+        require(!v.finalized[m], "Already finalized");
+        v.finalized[m] = true;
 
         emit VoteFinalized(projectId, m, passed);
-        _handleResult(p, projectId, m, passed);
+        _handleResult(projectId, m, passed);
     }
 
-    /*-----------------------HANDLE RESULT-----------------------*/
-
-    function _handleResult(
-        Project storage p,
-        uint256 projectId,
-        uint256 m,
-        bool passed
-    ) internal {
+    function _handleResult(uint256 projectId, uint256 m, bool passed) internal {
+        ProjectCore storage c = projectCore[projectId];
         uint256 alreadyReleased;
 
         for (uint256 i = 0; i < m; i++) {
-            if (i == 0) alreadyReleased += (p.totalFunded * 20) / 100;
-            else if (i == 1) alreadyReleased += (p.totalFunded * 30) / 100;
-            else if (i == 2) alreadyReleased += (p.totalFunded * 50) / 100;
+            if (i == 0) alreadyReleased += (c.totalFunded * 20) / 100;
+            else if (i == 1) alreadyReleased += (c.totalFunded * 30) / 100;
+            else if (i == 2) alreadyReleased += (c.totalFunded * 50) / 100;
         }
 
         if (!passed) {
-            if (m == 0) p.state = ProjectState.FailureRound1;
-            else if (m == 1) p.state = ProjectState.FailureRound2;
-            else p.state = ProjectState.FailureRound3;
+            if (m == 0) c.state = ProjectState.FailureRound1;
+            else if (m == 1) c.state = ProjectState.FailureRound2;
+            else c.state = ProjectState.FailureRound3;
 
-            claimableOwner[owner()] += p.bond;
-
-            uint256 refundTotal = p.totalFunded - alreadyReleased;
-            refundPool[projectId] = refundTotal;
+            claimableOwner[owner()] += c.bond;
+            refundPool[projectId] = c.totalFunded - alreadyReleased;
             return;
         }
 
         uint256 release;
         if (m == 0) {
-            release = (p.totalFunded * 20) / 100;
-            p.state = ProjectState.BuildingStage2;
+            release = (c.totalFunded * 20) / 100;
+            c.state = ProjectState.BuildingStage2;
         } else if (m == 1) {
-            release = (p.totalFunded * 30) / 100;
-            p.state = ProjectState.BuildingStage3;
+            release = (c.totalFunded * 30) / 100;
+            c.state = ProjectState.BuildingStage3;
         } else {
-            release = (p.totalFunded * 50) / 100;
-            p.state = ProjectState.Completed;
-            claimableCreator[p.creator] += p.bond;
+            release = (c.totalFunded * 50) / 100;
+            c.state = ProjectState.Completed;
+            claimableCreator[c.creator] += c.bond;
         }
 
-        claimableCreator[p.creator] += release;
+        claimableCreator[c.creator] += release;
     }
 
     /*-----------------------CLAIM FUNCTIONS-----------------------*/
 
     function claimCreator() external nonReentrant {
         uint256 amount = claimableCreator[msg.sender];
-        require(amount > 0, "Nothing");
+        require(amount > 0, "Nothing to claim");
         claimableCreator[msg.sender] = 0;
         (bool ok, ) = msg.sender.call{value: amount}("");
         require(ok);
@@ -402,7 +411,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function claimOwner() external nonReentrant {
         require(msg.sender == owner(), "Only owner");
         uint256 amount = claimableOwner[msg.sender];
-        require(amount > 0, "Nothing");
+        require(amount > 0, "Nothing to claim");
         claimableOwner[msg.sender] = 0;
         (bool ok, ) = msg.sender.call{value: amount}("");
         require(ok);
@@ -410,26 +419,23 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     }
 
     function claimRefund(uint256 projectId) external nonReentrant {
-        Project storage p = projects[projectId];
-
+        ProjectCore storage c = projectCore[projectId];
         require(
-            p.state == ProjectState.Cancelled ||
-                p.state == ProjectState.FailureRound1 ||
-                p.state == ProjectState.FailureRound2 ||
-                p.state == ProjectState.FailureRound3,
+            c.state == ProjectState.Cancelled ||
+                c.state == ProjectState.FailureRound1 ||
+                c.state == ProjectState.FailureRound2 ||
+                c.state == ProjectState.FailureRound3,
             "Refund not available"
         );
 
         require(!refundClaimed[projectId][msg.sender], "Already claimed");
-
-        uint256 investedAmount = p.invested[msg.sender];
+        uint256 investedAmount = invested[projectId][msg.sender];
         require(investedAmount > 0, "No investment");
 
         uint256 amount = (investedAmount * refundPool[projectId]) /
-            p.totalFunded;
-
+            c.totalFunded;
         refundClaimed[projectId][msg.sender] = true;
-        p.invested[msg.sender] = 0;
+        invested[projectId][msg.sender] = 0;
 
         (bool ok, ) = msg.sender.call{value: amount}("");
         require(ok);
@@ -441,24 +447,20 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 totalPayout;
 
         for (uint256 i = 1; i <= projectCount; i++) {
-            Project storage p = projects[i];
-
-            if (!_isRefundAvailable(p)) continue;
+            ProjectCore storage c = projectCore[i];
+            if (!_isRefundAvailable(i)) continue;
             if (refundClaimed[i][msg.sender]) continue;
-
-            uint256 investedAmount = p.invested[msg.sender];
+            uint256 investedAmount = invested[i][msg.sender];
             if (investedAmount == 0) continue;
 
-            uint256 refund = (investedAmount * refundPool[i]) / p.totalFunded;
-
+            uint256 refund = (investedAmount * refundPool[i]) / c.totalFunded;
             refundClaimed[i][msg.sender] = true;
-            p.invested[msg.sender] = 0;
+            invested[i][msg.sender] = 0;
 
             totalPayout += refund;
         }
 
         require(totalPayout > 0, "Nothing to claim");
-
         (bool ok, ) = msg.sender.call{value: totalPayout}("");
         require(ok);
 
@@ -468,19 +470,20 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     /*-----------------------UTILS-----------------------*/
 
     function _currentMilestone(
-        Project storage p
+        uint256 projectId
     ) internal view returns (uint256) {
+        ProjectCore storage c = projectCore[projectId];
         if (
-            p.state == ProjectState.VotingRound1 ||
-            p.state == ProjectState.FailureRound1
+            c.state == ProjectState.VotingRound1 ||
+            c.state == ProjectState.FailureRound1
         ) return 0;
         if (
-            p.state == ProjectState.VotingRound2 ||
-            p.state == ProjectState.FailureRound2
+            c.state == ProjectState.VotingRound2 ||
+            c.state == ProjectState.FailureRound2
         ) return 1;
         if (
-            p.state == ProjectState.VotingRound3 ||
-            p.state == ProjectState.FailureRound3
+            c.state == ProjectState.VotingRound3 ||
+            c.state == ProjectState.FailureRound3
         ) return 2;
         revert("Not voting or failed milestone");
     }
@@ -512,15 +515,16 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     }
 
     function _isRefundAvailable(
-        Project storage p
+        uint256 projectId
     ) internal view returns (bool) {
-        return (p.state == ProjectState.Cancelled ||
-            p.state == ProjectState.FailureRound1 ||
-            p.state == ProjectState.FailureRound2 ||
-            p.state == ProjectState.FailureRound3);
+        ProjectCore storage c = projectCore[projectId];
+        return (c.state == ProjectState.Cancelled ||
+            c.state == ProjectState.FailureRound1 ||
+            c.state == ProjectState.FailureRound2 ||
+            c.state == ProjectState.FailureRound3);
     }
 
-    /*-----------------------GET FUNCTION-----------------------*/
+    /*-----------------------GET FUNCTIONS-----------------------*/
 
     function getProjectCore(
         uint256 projectId
@@ -529,8 +533,6 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         view
         returns (
             address creator,
-            string memory name,
-            string memory description,
             Category category,
             uint256 softCapWei,
             uint256 totalFunded,
@@ -538,16 +540,14 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             ProjectState state
         )
     {
-        Project storage p = projects[projectId];
+        ProjectCore storage c = projectCore[projectId];
         return (
-            p.creator,
-            p.name,
-            p.description,
-            p.category,
-            p.softCapWei,
-            p.totalFunded,
-            p.bond,
-            p.state
+            c.creator,
+            c.category,
+            c.softCapWei,
+            c.totalFunded,
+            c.bond,
+            c.state
         );
     }
 
@@ -564,45 +564,53 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             bool[3] memory finalized
         )
     {
-        Project storage p = projects[projectId];
+        ProjectVoting storage v = projectVoting[projectId];
         return (
-            p.snapshotTotalFund,
-            snapshotTotalWeight[projectId],
-            p.yesWeight,
-            p.noWeight,
-            p.finalized
+            v.snapshotTotalFund,
+            v.snapshotTotalWeight,
+            v.yesWeight,
+            v.noWeight,
+            v.finalized
         );
     }
 
-    function getProjectMeta(
-        uint256 projectId
-    )
+    function getProjectMeta(uint256 projectId)
         external
         view
-        returns (string[3] memory milestoneHashes, address[] memory investors)
+        returns (
+            string memory name,
+            string memory description,
+            string[3] memory milestoneDescriptions,
+            string[3] memory milestoneHashes
+        )
     {
-        Project storage p = projects[projectId];
-        return (p.milestoneHashes, p.investors);
+        ProjectMeta storage m = projectMeta[projectId];
+        return (
+            m.name,
+            m.description,
+            m.milestoneDescriptions,
+            m.milestoneHashes
+        );
     }
 
     function getAllInvestments(
         uint256 projectId
     ) external view returns (address[] memory, uint256[] memory) {
-        Project storage p = projects[projectId];
-        uint256 len = p.investors.length;
+        address[] storage invs = investors[projectId];
+        uint256 len = invs.length;
         uint256[] memory investments = new uint256[](len);
 
         for (uint256 i = 0; i < len; i++) {
-            investments[i] = p.invested[p.investors[i]];
+            investments[i] = invested[projectId][invs[i]];
         }
 
-        return (p.investors, investments);
+        return (invs, investments);
     }
 
     function getProjectState(
         uint256 projectId
     ) public view returns (string memory) {
-        Project storage p = projects[projectId];
+        ProjectCore storage c = projectCore[projectId];
 
         string[12] memory states = [
             "Cancelled",
@@ -619,93 +627,13 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             "Completed"
         ];
 
-        return states[uint(p.state)];
-    }
-
-    function getAllFundingProjects() external view returns (uint256[] memory) {
-        uint256 count;
-
-        for (uint256 i = 1; i <= projectCount; i++) {
-            if (projects[i].state == ProjectState.Funding) {
-                count++;
-            }
-        }
-
-        uint256[] memory fundingProjects = new uint256[](count);
-        uint256 index = 0;
-
-        for (uint256 i = 1; i <= projectCount; i++) {
-            if (projects[i].state == ProjectState.Funding) {
-                fundingProjects[index] = i;
-                index++;
-            }
-        }
-
-        return fundingProjects;
-    }
-
-    function getMyInvestedProjects()
-        external
-        view
-        returns (
-            uint256[] memory projectIds,
-            address[] memory creators,
-            string[] memory names,
-            string[] memory descriptions,
-            Category[] memory categories,
-            uint256[] memory softCaps,
-            uint256[] memory totalFundeds,
-            uint256[] memory bonds,
-            ProjectState[] memory states,
-            uint256[] memory investments,
-            string[3][] memory milestones
-        )
-    {
-        uint256 count;
-
-        for (uint256 i = 1; i <= projectCount; i++) {
-            if (projects[i].isInvestor[msg.sender]) {
-                count++;
-            }
-        }
-
-        projectIds = new uint256[](count);
-        creators = new address[](count);
-        names = new string[](count);
-        descriptions = new string[](count);
-        categories = new Category[](count);
-        softCaps = new uint256[](count);
-        totalFundeds = new uint256[](count);
-        bonds = new uint256[](count);
-        states = new ProjectState[](count);
-        investments = new uint256[](count);
-        milestones = new string[3][](count);
-
-        uint256 index = 0;
-
-        for (uint256 i = 1; i <= projectCount; i++) {
-            if (projects[i].isInvestor[msg.sender]) {
-                Project storage p = projects[i];
-                projectIds[index] = i;
-                creators[index] = p.creator;
-                names[index] = p.name;
-                descriptions[index] = p.description;
-                categories[index] = p.category;
-                softCaps[index] = p.softCapWei;
-                totalFundeds[index] = p.totalFunded;
-                bonds[index] = p.bond;
-                states[index] = p.state;
-                investments[index] = p.invested[msg.sender];
-                milestones[index] = p.milestoneDescriptions;
-                index++;
-            }
-        }
+        return states[uint(c.state)];
     }
 
     function getMilestoneDescriptions(
         uint256 projectId
     ) external view returns (string[3] memory) {
-        return projects[projectId].milestoneDescriptions;
+        return projectMeta[projectId].milestoneDescriptions;
     }
 
     function getClaimableCreator() external view returns (uint256) {
@@ -719,27 +647,39 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     function getAllClaimableRefund()
         external
         view
-        returns (uint256 totalRefund)
+        returns (uint256)
     {
-        for (uint256 i = 1; i <= projectCount; i++) {
-            Project storage p = projects[i];
 
-            if (!_isRefundAvailable(p)) continue;
+        uint256 totalRefund;
+
+        for (uint256 i = 1; i <= projectCount; i++) {
+            ProjectCore storage c = projectCore[i];
+
+            if (
+                c.state != ProjectState.Cancelled &&
+                c.state != ProjectState.FailureRound1 &&
+                c.state != ProjectState.FailureRound2 &&
+                c.state != ProjectState.FailureRound3
+            ) {
+                continue;
+            }
+
             if (refundClaimed[i][msg.sender]) continue;
 
-            uint256 investedAmount = p.invested[msg.sender];
+            uint256 investedAmount = invested[i][msg.sender];
             if (investedAmount == 0) continue;
 
-            uint256 refund = (investedAmount * refundPool[i]) / p.totalFunded;
-
+            uint256 refund = (investedAmount * refundPool[i]) / c.totalFunded;
             totalRefund += refund;
         }
+
+        return totalRefund;
     }
 
     function getMyVotes(
         uint256 projectId,
         address user
     ) external view returns (VoteOption[3] memory) {
-        return projects[projectId].votes[user];
+        return votes[projectId][user];
     }
 }
