@@ -10,12 +10,14 @@ contract MilestoneFundingTest is Test {
     address creator;
     address investor1;
     address investor2;
+    address investor3;
     address deployer;
 
     function setUp() public {
         creator = vm.addr(1);
         investor1 = vm.addr(2);
         investor2 = vm.addr(3);
+        investor3 = vm.addr(4);
         deployer = vm.addr(100);
 
         vm.prank(deployer);
@@ -29,59 +31,91 @@ contract MilestoneFundingTest is Test {
         m[2] = "Milestone 3";
     }
 
+    /*-----------------------TEST CREATE PROJECT-----------------------*/
     function testCreateProject() public {
-        uint256 softCap = 10 ether;
-        uint256 bond = softCap / 10;
+        string[3] memory milestones = _milestones();
+        uint256 softCap = 1 ether;
 
-        vm.deal(creator, bond);
+        vm.deal(creator, softCap / 10);
         vm.prank(creator);
-        mf.createProject{value: bond}(
-            "Test Project",
-            "Description",
+        mf.createProject{value: softCap / 10}(
+            "Project A",
+            "Description A",
             softCap,
             MilestoneFunding.Category.Technology,
-            _milestones()
+            milestones
         );
 
         (
-            address projCreator,
+            address pCreator,
             string memory name,
             ,
+            MilestoneFunding.Category category,
             ,
-            uint256 softCapWei,
+            uint256 totalFunded,
             ,
-            uint256 bondWei,
             MilestoneFunding.ProjectState state
         ) = mf.getProjectCore(1);
-
-        assertEq(projCreator, creator);
-        assertEq(name, "Test Project");
-        assertEq(softCapWei, softCap);
-        assertEq(bondWei, bond);
+        assertEq(pCreator, creator);
+        assertEq(name, "Project A");
+        assertEq(uint(category), uint(MilestoneFunding.Category.Technology));
+        assertEq(totalFunded, 0);
         assertEq(uint(state), uint(MilestoneFunding.ProjectState.Funding));
     }
 
+    /*-----------------------TEST CANCEL PROJECT-----------------------*/
     function testCancelProject() public {
-        uint256 softCap = 10 ether;
+        string[3] memory milestones = _milestones();
+        uint256 softCap = 1 ether;
+
+        // create project
+        vm.deal(creator, softCap / 10);
+        vm.prank(creator);
+        mf.createProject{value: softCap / 10}(
+            "Project B",
+            "Desc",
+            softCap,
+            MilestoneFunding.Category.Hardware,
+            milestones
+        );
+
+        // cancel project
+        vm.prank(creator);
+        mf.cancelProject(1);
+
+        (, , , , , , , MilestoneFunding.ProjectState state) = mf.getProjectCore(
+            1
+        );
+        assertEq(uint(state), uint(MilestoneFunding.ProjectState.Cancelled));
+
+        vm.prank(owner);
+        uint256 ownerClaim = mf.getClaimableOwner();
+        assertEq(ownerClaim, softCap / 10);
+    }
+
+    /*-----------------------TEST FUND AND CANCEL PROJECT-----------------------*/
+    function testFundAndCancelProject() public {
+        string[3] memory milestones = _milestones();
+        uint256 softCap = 1 ether;
         uint256 bond = softCap / 10;
 
         vm.deal(creator, bond);
         vm.prank(creator);
         mf.createProject{value: bond}(
-            "Test",
+            "Project F",
             "Desc",
             softCap,
-            MilestoneFunding.Category.Technology,
-            _milestones()
+            MilestoneFunding.Category.Creative,
+            milestones
         );
 
-        vm.deal(investor1, 6 ether);
+        vm.deal(investor1, 0.6 ether);
         vm.prank(investor1);
-        mf.fund{value: 6 ether}(1);
+        mf.fund{value: 0.6 ether}(1);
 
-        vm.deal(investor2, 3 ether);
+        vm.deal(investor2, 0.3 ether);
         vm.prank(investor2);
-        mf.fund{value: 3 ether}(1);
+        mf.fund{value: 0.3 ether}(1);
 
         vm.prank(creator);
         mf.cancelProject(1);
@@ -91,129 +125,106 @@ contract MilestoneFundingTest is Test {
         );
         assertEq(uint(state), uint(MilestoneFunding.ProjectState.Cancelled));
 
-        uint256 i1Before = investor1.balance;
-        uint256 i2Before = investor2.balance;
+        vm.prank(owner);
+        uint256 ownerClaim = mf.getClaimableOwner();
+        assertEq(ownerClaim, bond / 2);
 
+        uint256 refundPool = mf.refundPool(1);
+        assertEq(refundPool, 0.9 ether + bond / 2);
+
+        uint256 investor1BalBefore = investor1.balance;
         vm.prank(investor1);
-        mf.claimInvestor();
+        mf.claimRefund(1);
+        uint256 investor1Refund = investor1.balance - investor1BalBefore;
+        assertEq(investor1Refund, (0.6 ether * refundPool) / 0.9 ether);
 
+        uint256 investor2BalBefore = investor2.balance;
         vm.prank(investor2);
-        mf.claimInvestor();
-
-        assertEq(investor1.balance - i1Before, 6 ether + (bond * 6) / 9);
-        assertEq(investor2.balance - i2Before, 3 ether + (bond * 3) / 9);
+        mf.claimRefund(1);
+        uint256 investor2Refund = investor2.balance - investor2BalBefore;
+        assertEq(investor2Refund, (0.3 ether * refundPool) / 0.9 ether);
     }
 
-    function testFundAndSnapshot() public {
-        uint256 softCap = 10 ether;
-        uint256 bond = softCap / 10;
-
-        vm.deal(creator, bond);
-        vm.prank(creator);
-        mf.createProject{value: bond}(
-            "Project",
-            "Desc",
-            softCap,
-            MilestoneFunding.Category.Technology,
-            _milestones()
-        );
-
-        vm.deal(investor1, 6 ether);
-        vm.prank(investor1);
-        mf.fund{value: 6 ether}(1);
-
-        vm.deal(investor2, 4 ether);
-        vm.prank(investor2);
-        mf.fund{value: 4 ether}(1);
-
-        (
-            ,
-            ,
-            ,
-            ,
-            uint256 totalFunded,
-            ,
-            ,
-            MilestoneFunding.ProjectState state
-        ) = mf.getProjectCore(1);
-
-        assertEq(totalFunded, 10 ether);
-        assertEq(
-            uint(state),
-            uint(MilestoneFunding.ProjectState.BuildingStage1)
-        );
-    }
-
+    /*-----------------------TEST SUBMIT MILESTONE AND VOTE PASS-----------------------*/
     function testSubmitMilestoneAndVotePass() public {
-        uint256 softCap = 10 ether;
+        string[3] memory milestones = _milestones();
+        uint256 softCap = 1 ether;
         uint256 bond = softCap / 10;
 
         vm.deal(creator, bond);
         vm.prank(creator);
         mf.createProject{value: bond}(
-            "Project",
+            "Project D",
             "Desc",
             softCap,
-            MilestoneFunding.Category.Technology,
-            _milestones()
+            MilestoneFunding.Category.Creative,
+            milestones
         );
 
-        vm.deal(investor1, 6 ether);
+        vm.deal(investor1, 0.3 ether);
         vm.prank(investor1);
-        mf.fund{value: 6 ether}(1);
+        mf.fund{value: 0.3 ether}(1);
 
-        vm.deal(investor2, 4 ether);
+        vm.deal(investor2, 0.3 ether);
         vm.prank(investor2);
-        mf.fund{value: 4 ether}(1);
+        mf.fund{value: 0.3 ether}(1);
+
+        vm.deal(investor3, 0.4 ether);
+        vm.prank(investor3);
+        mf.fund{value: 0.4 ether}(1);
 
         vm.prank(creator);
         mf.submitMilestone(1, "QmHash1");
 
         vm.prank(investor1);
-        mf.vote(1, MilestoneFunding.VoteOption.Yes);
+        mf.vote(1, MilestoneFunding.VoteOption.Yes); //0.3
 
         vm.prank(investor2);
-        mf.vote(1, MilestoneFunding.VoteOption.Yes);
+        mf.vote(1, MilestoneFunding.VoteOption.No); //0.3
 
-        (, , , , , , , MilestoneFunding.ProjectState state) = mf.getProjectCore(
-            1
-        );
-        assertEq(
-            uint(state),
-            uint(MilestoneFunding.ProjectState.BuildingStage2)
-        );
+        vm.prank(investor3);
+        mf.vote(1, MilestoneFunding.VoteOption.Yes); //0.4
+
+        (, , , , bool[3] memory finalized) = mf.getProjectVoting(1);
+        assertTrue(finalized[0]);
+
+        vm.prank(creator);
+        uint256 claimable = mf.getClaimableCreator();
+        assertEq(claimable, 200_000_000_000_000_000);
     }
 
-    function testVoteFailRefundAndOwnerGetsBond() public {
-        uint256 softCap = 10 ether;
+    /*-----------------------TEST SUBMIT MILESTONE AND VOTE FAILED-----------------------*/
+    function testSubmitMilestoneAndVoteFailed() public {
+        string[3] memory milestones = _milestones();
+        uint256 softCap = 1 ether;
         uint256 bond = softCap / 10;
 
         vm.deal(creator, bond);
         vm.prank(creator);
         mf.createProject{value: bond}(
-            "Project",
+            "Project D",
             "Desc",
             softCap,
-            MilestoneFunding.Category.Technology,
-            _milestones()
+            MilestoneFunding.Category.Creative,
+            milestones
         );
 
-        vm.deal(investor1, 6 ether);
+        vm.deal(investor1, 0.6 ether);
         vm.prank(investor1);
-        mf.fund{value: 6 ether}(1);
+        mf.fund{value: 0.6 ether}(1);
 
-        vm.deal(investor2, 4 ether);
+        vm.deal(investor2, 0.4 ether);
         vm.prank(investor2);
-        mf.fund{value: 4 ether}(1);
+        mf.fund{value: 0.4 ether}(1);
 
         vm.prank(creator);
-        mf.submitMilestone(1, "QmFail");
+        mf.submitMilestone(1, "QmHash1");
 
         vm.prank(investor1);
         mf.vote(1, MilestoneFunding.VoteOption.No);
 
         vm.prank(investor2);
-        mf.vote(1, MilestoneFunding.VoteOption.Yes);
+        mf.vote(1, MilestoneFunding.VoteOption.No);
 
         (, , , , , , , MilestoneFunding.ProjectState state) = mf.getProjectCore(
             1
@@ -222,39 +233,35 @@ contract MilestoneFundingTest is Test {
             uint(state),
             uint(MilestoneFunding.ProjectState.FailureRound1)
         );
-
-        vm.prank(investor1);
-        mf.claimInvestor();
-        vm.prank(investor2);
-        mf.claimInvestor();
-
-        uint256 ownerBefore = owner.balance;
-        vm.prank(owner);
-        mf.claimOwner();
-        assertEq(owner.balance - ownerBefore, bond);
     }
 
-    function testClaimCreator() public {
-        uint256 softCap = 10 ether;
+    /*-----------------------TEST VOTE FAIL REFUND AND OWNER GETS BOND-----------------------*/
+    function testVoteFailRefundAndOwnerGetsBond() public {
+        string[3] memory milestones = _milestones();
+        uint256 softCap = 1 ether;
         uint256 bond = softCap / 10;
 
         vm.deal(creator, bond);
         vm.prank(creator);
         mf.createProject{value: bond}(
-            "Test Project",
-            "Description",
+            "Project D",
+            "Desc",
             softCap,
-            MilestoneFunding.Category.Technology,
-            _milestones()
+            MilestoneFunding.Category.Creative,
+            milestones
         );
 
-        vm.deal(investor1, 6 ether);
+        vm.deal(investor1, 0.3 ether);
         vm.prank(investor1);
-        mf.fund{value: 6 ether}(1);
+        mf.fund{value: 0.3 ether}(1);
 
-        vm.deal(investor2, 4 ether);
+        vm.deal(investor2, 0.3 ether);
         vm.prank(investor2);
-        mf.fund{value: 4 ether}(1);
+        mf.fund{value: 0.3 ether}(1);
+
+        vm.deal(investor3, 0.4 ether);
+        vm.prank(investor3);
+        mf.fund{value: 0.4 ether}(1);
 
         vm.prank(creator);
         mf.submitMilestone(1, "QmHash1");
@@ -263,12 +270,48 @@ contract MilestoneFundingTest is Test {
         mf.vote(1, MilestoneFunding.VoteOption.Yes);
         vm.prank(investor2);
         mf.vote(1, MilestoneFunding.VoteOption.Yes);
+        vm.prank(investor3);
+        mf.vote(1, MilestoneFunding.VoteOption.Yes);
 
-        uint256 balanceBefore = creator.balance;
         vm.prank(creator);
-        mf.claimCreator();
-        uint256 balanceAfter = creator.balance;
+        mf.submitMilestone(1, "QmHash2"); // projectId = 1
 
-        assertEq(balanceAfter - balanceBefore, 2 ether);
+        vm.prank(investor1);
+        mf.vote(1, MilestoneFunding.VoteOption.No);
+        vm.prank(investor2);
+        mf.vote(1, MilestoneFunding.VoteOption.No);
+        vm.prank(investor3);
+        mf.vote(1, MilestoneFunding.VoteOption.No);
+
+        (, , , , , , , MilestoneFunding.ProjectState state) = mf.getProjectCore(
+            1
+        );
+        assertEq(
+            uint(state),
+            uint(MilestoneFunding.ProjectState.FailureRound2)
+        );
+
+        uint256 bal1 = investor1.balance;
+        uint256 bal2 = investor2.balance;
+        uint256 bal3 = investor3.balance;
+
+        vm.prank(investor1);
+        mf.claimAllRefund();
+        vm.prank(investor2);
+        mf.claimAllRefund();
+        vm.prank(investor3);
+        mf.claimAllRefund();
+
+        assertEq(investor1.balance - bal1, 0.24 ether);
+        assertEq(investor2.balance - bal2, 0.24 ether);
+        assertEq(investor3.balance - bal3, 0.32 ether);
+
+        vm.prank(owner);
+        uint256 ownerClaim = mf.getClaimableOwner();
+        assertEq(ownerClaim, bond);
+
+        vm.prank(creator);
+        uint256 creatorClaim = mf.getClaimableCreator();
+        assertEq(creatorClaim, 0.2 ether);
     }
 }
