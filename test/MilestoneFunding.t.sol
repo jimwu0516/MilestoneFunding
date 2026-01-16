@@ -63,7 +63,7 @@ contract MilestoneFundingTest is Test {
             string memory name,
             string memory description,
             string[3] memory milestoneDescs,
-            string[3] memory milestoneHashes
+            bytes[3] memory milestoneHashes
         ) = mf.getProjectMeta(1);
         assertEq(name, "Project A");
         assertEq(description, "Description A");
@@ -180,7 +180,7 @@ contract MilestoneFundingTest is Test {
         mf.fund{value: 0.4 ether}(1);
 
         vm.prank(creator);
-        mf.submitMilestone(1, "QmHash1");
+        mf.submitMilestone(1, bytes("QmHash1"));
 
         vm.prank(investor1);
         mf.vote(1, MilestoneFunding.VoteOption.Yes); //0.3
@@ -222,7 +222,7 @@ contract MilestoneFundingTest is Test {
         mf.fund{value: 0.4 ether}(1);
 
         vm.prank(creator);
-        mf.submitMilestone(1, "QmHash1");
+        mf.submitMilestone(1, bytes("QmHash1"));
 
         vm.prank(investor1);
         mf.vote(1, MilestoneFunding.VoteOption.No);
@@ -265,7 +265,7 @@ contract MilestoneFundingTest is Test {
         mf.fund{value: 0.4 ether}(1);
 
         vm.prank(creator);
-        mf.submitMilestone(1, "QmHash1");
+        mf.submitMilestone(1, bytes("QmHash1"));
 
         vm.prank(investor1);
         mf.vote(1, MilestoneFunding.VoteOption.Yes);
@@ -339,7 +339,7 @@ contract MilestoneFundingTest is Test {
         mf.fund{value: 0.4 ether}(1);
 
         vm.prank(creator);
-        mf.submitMilestone(1, "QmHash1");
+        mf.submitMilestone(1, bytes("QmHash1"));
 
         vm.prank(investor1);
         mf.vote(1, MilestoneFunding.VoteOption.Yes);

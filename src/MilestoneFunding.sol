@@ -56,7 +56,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         string name;
         string description;
         string[3] milestoneDescriptions;
-        string[3] milestoneHashes;
+        bytes[3] milestoneHashes;
     }
 
     struct ProjectVoting {
@@ -107,7 +107,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     event MilestoneSubmitted(
         uint256 indexed projectId,
         uint256 milestone,
-        string ipfsHash
+        bytes cid
     );
     event Voted(
         uint256 indexed projectId,
@@ -168,7 +168,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             name: name,
             description: description,
             milestoneDescriptions: milestoneDescriptions,
-            milestoneHashes: ["", "", ""]
+            milestoneHashes: [bytes(""), bytes(""), bytes("")]
         });
 
         projectVoting[projectId] = ProjectVoting({
@@ -263,25 +263,13 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
     /*-----------------------MILESTONE-----------------------*/
 
-    function submitMilestone(
-        uint256 projectId,
-        string calldata ipfsHash
-    ) external {
+    function submitMilestone(uint256 projectId, bytes calldata cid) external {
         ProjectCore storage c = projectCore[projectId];
         ProjectMeta storage m = projectMeta[projectId];
         require(msg.sender == c.creator, "Not creator");
 
-        uint256 len = bytes(ipfsHash).length;
-        require(len > 0, "IPFS hash required");
-        require(len <= 128, "IPFS hash too long");
-
-        if (len == 46) {
-            bytes memory hashBytes = bytes(ipfsHash);
-            require(
-                hashBytes[0] == "Q" && hashBytes[1] == "m",
-                "Invalid CIDv0"
-            );
-        }
+        require(cid.length > 0, "CID required");
+        require(cid.length <= 64, "CID too long");
 
         uint256 milestone;
         if (c.state == ProjectState.BuildingStage1) {
@@ -297,8 +285,8 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             revert("Wrong stage");
         }
 
-        m.milestoneHashes[milestone] = ipfsHash;
-        emit MilestoneSubmitted(projectId, milestone, ipfsHash);
+        m.milestoneHashes[milestone] = cid;
+        emit MilestoneSubmitted(projectId, milestone, cid);
     }
 
     function vote(uint256 projectId, VoteOption option) external {
@@ -574,14 +562,16 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         );
     }
 
-    function getProjectMeta(uint256 projectId)
+    function getProjectMeta(
+        uint256 projectId
+    )
         external
         view
         returns (
             string memory name,
             string memory description,
             string[3] memory milestoneDescriptions,
-            string[3] memory milestoneHashes
+            bytes[3] memory milestoneHashes
         )
     {
         ProjectMeta storage m = projectMeta[projectId];
@@ -644,12 +634,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         return claimableOwner[msg.sender];
     }
 
-    function getAllClaimableRefund()
-        external
-        view
-        returns (uint256)
-    {
-
+    function getAllClaimableRefund() external view returns (uint256) {
         uint256 totalRefund;
 
         for (uint256 i = 1; i <= projectCount; i++) {
