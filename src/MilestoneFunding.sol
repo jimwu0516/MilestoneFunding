@@ -583,6 +583,57 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         );
     }
 
+    function getAllFundingProjects() external view returns (uint256[] memory) {
+        uint256 count;
+        uint256 total = projectCount;
+
+        for (uint256 i = 1; i <= total; i++) {
+            if (projectCore[i].state == ProjectState.Funding) {
+                count++;
+            }
+        }
+
+        uint256[] memory ids = new uint256[](count);
+        uint256 index;
+
+        for (uint256 i = 1; i <= total; i++) {
+            if (projectCore[i].state == ProjectState.Funding) {
+                ids[index] = i;
+                index++;
+            }
+        }
+
+        return ids;
+    }
+
+    function getMyInvestedProjects()
+        external
+        view
+        returns (uint256[] memory)
+    {
+        address user = msg.sender;
+        uint256 count;
+        uint256 total = projectCount;
+
+        for (uint256 i = 1; i <= total; i++) {
+            if (invested[i][user] > 0) {
+                count++;
+            }
+        }
+
+        uint256[] memory ids = new uint256[](count);
+        uint256 index;
+
+        for (uint256 i = 1; i <= total; i++) {
+            if (invested[i][user] > 0) {
+                ids[index] = i;
+                index++;
+            }
+        }
+
+        return ids;
+    }
+
     function getAllInvestments(
         uint256 projectId
     ) external view returns (address[] memory, uint256[] memory) {
