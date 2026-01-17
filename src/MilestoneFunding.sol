@@ -111,14 +111,27 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         uint256 milestone,
         bool passed
     );
-    event Claim(address indexed user, uint256 amount, string role);
-    event ProjectCancelled(uint256 indexed projectId);
+    event Claim(
+        address indexed user, 
+        uint256 amount, 
+        string role
+    );
+    event ProjectCancelled(
+        uint256 indexed projectId
+    );
     event MilestoneReleased(
         uint256 indexed projectId,
         uint256 milestone,
         address indexed recipient,
         uint256 amount
     );
+    event VotingStarted(
+        uint256 indexed projectId,
+        string projectName,
+        uint256 milestone,
+        address[] investors
+    );
+
 
     /*-----------------------CREATE PROJECT-----------------------*/
 
@@ -246,6 +259,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         p.state = ProjectState(uint8(ProjectState.VotingRound1) + m * 3);
 
         emit MilestoneSubmitted(projectId, m, ipfsHash);
+        emit VotingStarted(projectId, p.name, m+1, p.investorList);
     }
 
     function vote(uint256 projectId, VoteOption option) external {
