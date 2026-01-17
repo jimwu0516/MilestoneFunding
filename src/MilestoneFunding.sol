@@ -235,10 +235,13 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     ) external {
         Project storage p = projects[projectId];
         require(msg.sender == p.creator, "Not creator");
+
         uint256 len = bytes(ipfsHash).length;
         require(len > 0 && len <= 128, "Invalid IPFS hash");
 
         uint256 m = _currentMilestoneIndex(p);
+        require(p.state == ProjectState(uint8(ProjectState.BuildingStage1) + m * 3), "Not building stage");
+        require(bytes(p.milestoneHashes[m]).length == 0, "Already submitted");
         p.milestoneHashes[m] = ipfsHash;
         p.state = ProjectState(uint8(ProjectState.VotingRound1) + m * 3);
 
@@ -251,6 +254,9 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
         uint256 m = _currentMilestoneIndex(p);
         require(inv.votes[m] == VoteOption.None, "Already voted");
+        require(p.state == ProjectState(uint8(ProjectState.VotingRound1) + m * 3), "Not in voting stage");
+        require(option == VoteOption.Yes || option == VoteOption.No,"Invalid vote option");
+
 
         inv.votes[m] = option;
 
