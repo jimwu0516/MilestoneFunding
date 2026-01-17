@@ -185,7 +185,7 @@ contract MilestoneFundingTest is Test {
         vm.prank(investor3);
         mf.vote(1, MilestoneFunding.VoteOption.Yes); //0.4
 
-        (, , , , bool[3] memory finalized) = mf.getProjectVoting(1);
+        ( , , , bool[3] memory finalized) = mf.getProjectVoting(1);
         assertTrue(finalized[0]);
 
         vm.prank(creator);

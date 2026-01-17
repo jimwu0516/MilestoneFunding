@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract MilestoneFunding is Ownable, ReentrancyGuard {
-    uint256 constant MIN_INVEST = 1e14; // 0.0001 ETH
+    uint256 constant MIN_INVEST = 1e14;
 
     constructor() Ownable(msg.sender) {}
 
@@ -47,6 +47,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
     struct InvestorInfo {
         uint256 amount;
+        uint32 weight;
         VoteOption[3] votes;
         bool exists;
         bool refunded;
@@ -63,13 +64,13 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         ProjectState state;
         string[3] milestoneDescriptions;
         string[3] milestoneHashes;
-        uint32[3] yesWeight;
-        uint32[3] noWeight;
         bool[3] finalized;
-        uint256 snapshotTotalFund;
         uint256 snapshotTotalWeight;
         address[] investorList;
         mapping(address => InvestorInfo) investors;
+        uint256[3] yesWeight;
+        uint256[3] noWeight;
+        uint256[3] votedWeight;
     }
 
     /*-----------------------STORAGE-----------------------*/
@@ -112,6 +113,12 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     );
     event Claim(address indexed user, uint256 amount, string role);
     event ProjectCancelled(uint256 indexed projectId);
+    event MilestoneReleased(
+        uint256 indexed projectId,
+        uint256 milestone,
+        address indexed recipient,
+        uint256 amount
+    );
 
     /*-----------------------CREATE PROJECT-----------------------*/
 
@@ -175,13 +182,17 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
             inv.exists = true;
             p.investorList.push(msg.sender);
         }
+
+        uint32 prevWeight = inv.weight;
         inv.amount += accepted;
+        inv.weight = _weight(inv.amount);
+        p.snapshotTotalWeight = p.snapshotTotalWeight + inv.weight - prevWeight;
+
         p.totalFunded += accepted;
 
         emit Funded(projectId, msg.sender, accepted);
 
         if (p.totalFunded >= p.softCapWei) {
-            _snapshot(p);
             p.state = ProjectState.BuildingStage1;
         }
 
@@ -206,24 +217,14 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         if (totalFunded == 0) {
             claimableOwner[owner()] += bond;
         } else {
-            claimableOwner[owner()] += bond / 2;
-            refundPool[projectId] = totalFunded + (bond - bond / 2);
+            uint256 halfBond = bond / 2;
+            uint256 remainingBond = bond - halfBond;
+            claimableOwner[owner()] += halfBond;
+            refundPool[projectId] = totalFunded + remainingBond;
         }
 
         emit ProjectCancelled(projectId);
         p.bond = 0;
-    }
-
-    function _snapshot(Project storage p) internal {
-        uint256 totalWeight = 0;
-        p.snapshotTotalFund = p.totalFunded;
-        for (uint i = 0; i < p.investorList.length; i++) {
-            address invAddr = p.investorList[i];
-            InvestorInfo storage inv = p.investors[invAddr];
-            uint256 w = _weight(inv.amount, p.snapshotTotalFund);
-            totalWeight += w;
-        }
-        p.snapshotTotalWeight = totalWeight;
     }
 
     /*-----------------------MILESTONE & VOTE-----------------------*/
@@ -239,30 +240,32 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
 
         uint256 m = _currentMilestoneIndex(p);
         p.milestoneHashes[m] = ipfsHash;
-        p.state = ProjectState(uint8(ProjectState.VotingRound1) + m * 3); 
+        p.state = ProjectState(uint8(ProjectState.VotingRound1) + m * 3);
 
         emit MilestoneSubmitted(projectId, m, ipfsHash);
     }
 
     function vote(uint256 projectId, VoteOption option) external {
-        require(
-            option == VoteOption.Yes || option == VoteOption.No,
-            "Invalid vote"
-        );
         Project storage p = projects[projectId];
         InvestorInfo storage inv = p.investors[msg.sender];
-        require(inv.exists, "Not investor");
 
         uint256 m = _currentMilestoneIndex(p);
-        require(!p.finalized[m], "Finalized");
         require(inv.votes[m] == VoteOption.None, "Already voted");
 
         inv.votes[m] = option;
-        uint32 w = uint32(_weight(inv.amount, p.snapshotTotalFund));
-        if (option == VoteOption.Yes) p.yesWeight[m] += w;
-        else p.noWeight[m] += w;
+
+        uint256 w = inv.weight;
+
+        if (option == VoteOption.Yes) {
+            p.yesWeight[m] += w;
+        } else {
+            p.noWeight[m] += w;
+        }
+
+        p.votedWeight[m] += w;
 
         emit Voted(projectId, msg.sender, m, option);
+
         _tryFinalize(p, projectId, m);
     }
 
@@ -273,16 +276,16 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
     ) internal {
         uint256 yes = p.yesWeight[m];
         uint256 no = p.noWeight[m];
+        uint256 voted = p.votedWeight[m];
         uint256 total = p.snapshotTotalWeight;
 
-        uint256 voted = yes + no;
-        if (voted * 100 < total * 70) return;
+        bool quorum = voted * 100 >= total * 70;
+
+        if (!quorum) return;
 
         if (no * 100 >= total * 40) {
             _finalize(p, projectId, m, false);
-            return;
-        }
-        if (yes > no + (total - voted)) {
+        } else if (yes > no + (total - voted)) {
             _finalize(p, projectId, m, true);
         }
     }
@@ -321,12 +324,17 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         } else {
             uint256 release = (p.totalFunded * milestonesPerc[m]) / 100;
             claimableCreator[p.creator] += release;
-            if (m == 2) claimableCreator[p.creator] += p.bond;
-            p.state = ProjectState(
-                // casting to 'uint8' is safe because [explain why]
-                // forge-lint: disable-next-line(unsafe-typecast)
-                uint8(ProjectState.BuildingStage2) + uint8(m)
-            );
+
+            emit MilestoneReleased(projectId, m + 1, p.creator, release);
+
+            if (m == 2) {
+                claimableCreator[p.creator] += p.bond;
+                p.state = ProjectState.Completed;
+            } else {
+                p.state = ProjectState(
+                    uint8(ProjectState.BuildingStage2) + m * 3
+                );
+            }
         }
     }
 
@@ -424,14 +432,49 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         return s == 0 || s == 4 || s == 7 || s == 10;
     }
 
-    function _weight(
-        uint256 invest,
-        uint256 total
-    ) internal pure returns (uint32) {
-        if (invest == 0 || total == 0) return 0;
+    function _weight(uint256 invest) internal pure returns (uint32) {
+        if (invest == 0) return 0;
+        uint256 w = _log2(invest + 1) * 1e5;
+        if (w > type(uint32).max) w = type(uint32).max;
         // casting to 'uint32' is safe because [explain why]
         // forge-lint: disable-next-line(unsafe-typecast)
-        return uint32((invest * 1e6) / total);
+        return uint32(w);
+    }
+
+    function _log2(uint256 x) internal pure returns (uint256 y) {
+        uint256 n = 0;
+        if (x >= 2 ** 128) {
+            x >>= 128;
+            n += 128;
+        }
+        if (x >= 2 ** 64) {
+            x >>= 64;
+            n += 64;
+        }
+        if (x >= 2 ** 32) {
+            x >>= 32;
+            n += 32;
+        }
+        if (x >= 2 ** 16) {
+            x >>= 16;
+            n += 16;
+        }
+        if (x >= 2 ** 8) {
+            x >>= 8;
+            n += 8;
+        }
+        if (x >= 2 ** 4) {
+            x >>= 4;
+            n += 4;
+        }
+        if (x >= 2 ** 2) {
+            x >>= 2;
+            n += 2;
+        }
+        if (x >= 2 ** 1) {
+            n += 1;
+        }
+        return n;
     }
 
     /*-----------------------GET FUNCTION-----------------------*/
@@ -470,7 +513,6 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         external
         view
         returns (
-            uint256 snapshotTotalFund,
             uint256 totalWeight,
             uint256[3] memory yesWeight,
             uint256[3] memory noWeight,
@@ -478,19 +520,7 @@ contract MilestoneFunding is Ownable, ReentrancyGuard {
         )
     {
         Project storage p = projects[projectId];
-        uint256[3] memory yes;
-        uint256[3] memory no;
-        for (uint i = 0; i < 3; i++) {
-            yes[i] = p.yesWeight[i];
-            no[i] = p.noWeight[i];
-        }
-        return (
-            p.snapshotTotalFund,
-            p.snapshotTotalWeight,
-            yes,
-            no,
-            p.finalized
-        );
+        return (p.snapshotTotalWeight, p.yesWeight, p.noWeight, p.finalized);
     }
 
     function getProjectMeta(
